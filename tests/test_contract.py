@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-
 from conftest import FakeModelManager, FakeRepository
+
 from laboratorio_2.main import create_app
 from laboratorio_2.services import ForecastService, ObservationService, RetrainingService
 

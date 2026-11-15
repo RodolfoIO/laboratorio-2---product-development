@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 import numpy as np
 import pandas as pd
@@ -169,9 +169,9 @@ def build_prediction_features(
         )
         exact = family_history.set_index("fecha")["ventas"]
         values = family_history["ventas"]
-        lag_7_date = target_timestamp - pd.Timedelta(days=7)
-        lag_14_date = target_timestamp - pd.Timedelta(days=14)
-        lag_28_date = target_timestamp - pd.Timedelta(days=28)
+        lag_7_date = target_timestamp - timedelta(days=7)
+        lag_14_date = target_timestamp - timedelta(days=14)
+        lag_28_date = target_timestamp - timedelta(days=28)
         rows.append(
             {
                 "tienda_id": store_id,

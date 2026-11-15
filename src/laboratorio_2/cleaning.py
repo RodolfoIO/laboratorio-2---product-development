@@ -60,11 +60,12 @@ def normalize_date(value: object) -> tuple[date, bool, str | None]:
     candidate = value.strip()
     if not candidate:
         raise DataContractError("fecha no puede estar vacia")
-    try:
-        timestamp = datetime.fromisoformat(candidate.replace("Z", "+00:00"))
-        return timestamp.date(), True, "La fecha con hora se interpreto como su dia"
-    except ValueError:
-        pass
+    if "T" in candidate.upper() or " " in candidate:
+        try:
+            timestamp = datetime.fromisoformat(candidate.replace("Z", "+00:00"))
+            return timestamp.date(), True, "La fecha con hora se interpreto como su dia"
+        except ValueError:
+            pass
 
     formats = [
         "%Y-%m-%d",
@@ -131,7 +132,7 @@ def normalize_non_negative_int(
         if parsed_decimal != parsed_decimal.to_integral_value():
             raise DataContractError(f"{field_name} debe ser un entero no negativo")
         parsed = int(parsed_decimal)
-        repaired = not candidate.isdecimal() or candidate != str(parsed)
+        repaired = True
     else:
         raise DataContractError(f"{field_name} debe ser un entero no negativo")
     if parsed < 0:

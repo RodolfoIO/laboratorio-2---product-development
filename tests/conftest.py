@@ -130,7 +130,14 @@ class FakeRepository:
         values = self.runs.get(run_id)
         if values is None:
             return None
-        return type("Run", (), values)()
+        defaults = {
+            "state": "en_curso",
+            "promoted": None,
+            "version": None,
+            "motive": None,
+        }
+        defaults.update(values)
+        return type("Run", (), defaults)()
 
     async def update_retraining_run(self, run_id, **values):
         self.runs[run_id] = {

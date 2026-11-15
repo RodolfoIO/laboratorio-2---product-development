@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import joblib
-import pandas as pd
 import tempfile
 from pathlib import Path
+
+import joblib
+import pandas as pd
 
 from laboratorio_2.features import (
     PredictionFamily,
