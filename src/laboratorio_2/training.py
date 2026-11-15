@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import subprocess
 import tempfile
@@ -12,11 +13,15 @@ import joblib
 import pandas as pd
 
 from laboratorio_2.config import Settings
+from laboratorio_2.contracts import ModelInfo
 from laboratorio_2.features import build_training_features
 from laboratorio_2.forecasting import ForecastArtifact, LightGBMForecaster, SeasonalBaseline
 from laboratorio_2.metrics import ForecastMetrics, should_promote
 from laboratorio_2.mlflow_registry import MlflowRegistry, RegisteredVersion
 from laboratorio_2.repository import ProductRepository
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 @dataclass
@@ -83,7 +88,6 @@ class TrainingPipeline:
         self,
         run_id: str,
         *,
-        promote: bool = True,
         log_mlflow: bool = True,
     ) -> TrainingOutcome:
         catalog = await self.repository.get_catalog()
@@ -167,6 +171,14 @@ class TrainingPipeline:
             )
             promoted = promote_candidate
             selected = candidate if promote_candidate else champion
+        logger.info(
+            "Retraining %s decision: promoted=%s champion=%s selected=%s motive=%s",
+            run_id,
+            promoted,
+            champion_version,
+            selected.algorithm,
+            motive,
+        )
 
         candidate_version: RegisteredVersion | None = None
         baseline_version: RegisteredVersion | None = None
@@ -202,7 +214,15 @@ class TrainingPipeline:
                     tags=common_tags,
                     run_id_hint=run_id,
                 )
-            if promote or selected_version is None:
+            logger.info(
+                "Retraining %s registered versions baseline=%s candidate=%s; "
+                "alias before promotion=%s",
+                run_id,
+                baseline_version.version,
+                candidate_version.version,
+                self.registry.get_alias(),
+            )
+            if promoted or selected_version is None:
                 selected_version = (
                     candidate_version.version
                     if selected.algorithm == "lightgbm"
@@ -210,6 +230,17 @@ class TrainingPipeline:
                 )
                 self.registry.set_champion(selected_version)
                 self._cache_selected_model(selected, selected_version)
+            current_alias = self.registry.get_alias()
+            if current_alias is not None:
+                selected_version = current_alias[0]
+            logger.info(
+                "Retraining %s finished with champion version %s",
+                run_id,
+                selected_version,
+            )
+        else:
+            selected_version = "local"
+            self._cache_selected_model(selected, selected_version)
 
         if selected_version is None:
             selected_version = "local"
@@ -237,18 +268,12 @@ class TrainingPipeline:
         joblib.dump(artifact, alias_temp)
         os.replace(alias_temp, self.settings.model_cache_path)
         metadata_temp = directory / ".champion-meta.tmp"
-        metadata_temp.write_text(
-            (
-                '{"name": "'
-                + self.settings.mlflow_model_name
-                + '", "alias": "'
-                + self.settings.mlflow_alias
-                + '", "version": "'
-                + version
-                + '"}'
-            ),
-            encoding="utf-8",
+        metadata = ModelInfo(
+            nombre=self.settings.mlflow_model_name,
+            alias=self.settings.mlflow_alias,
+            version=version,
         )
+        metadata_temp.write_text(metadata.model_dump_json(), encoding="utf-8")
         os.replace(metadata_temp, directory / "champion.json")
 
 

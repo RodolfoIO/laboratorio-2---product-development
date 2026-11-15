@@ -53,7 +53,6 @@ async def _wait_mlflow(registry: MlflowRegistry, timeout_seconds: int = 120) -> 
 
 
 async def bootstrap(settings: Settings) -> None:
-    command.upgrade(_migration_config(), "head")
     database = Database(settings)
     repository = ProductRepository(database)
     try:
@@ -69,7 +68,7 @@ async def bootstrap(settings: Settings) -> None:
         alias = await asyncio.to_thread(registry.get_alias)
         if alias is None:
             pipeline = TrainingPipeline(settings, repository, registry)
-            await pipeline.train(f"bootstrap-{uuid4()}", promote=True, log_mlflow=True)
+            await pipeline.train(f"bootstrap-{uuid4()}", log_mlflow=True)
 
         manager = ModelManager(settings, registry)
         await manager.refresh_once()
@@ -77,6 +76,11 @@ async def bootstrap(settings: Settings) -> None:
             raise RuntimeError("El modelo inicial no pudo cargarse en la cache local")
     finally:
         await database.close()
+
+
+def bootstrap_all(settings: Settings) -> None:
+    command.upgrade(_migration_config(), "head")
+    asyncio.run(bootstrap(settings))
 
 
 async def retrain(settings: Settings, run_id: str) -> None:
@@ -87,13 +91,26 @@ async def retrain(settings: Settings, run_id: str) -> None:
         await services.stop()
 
 
+async def import_published(settings: Settings) -> None:
+    database = Database(settings)
+    try:
+        bundle = load_published_data(settings.data_dir)
+        catalog = await import_data(database, bundle)
+        print(
+            f"Datos importados: {len(catalog.stores)} tiendas, "
+            f"{len(catalog.families)} familias, huella {bundle.fingerprint[:12]}"
+        )
+    finally:
+        await database.close()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="NovaMercado forecasting service")
     parser.add_argument(
         "command",
         nargs="?",
         default="serve",
-        choices=("serve", "bootstrap", "retrain"),
+        choices=("serve", "bootstrap", "import-data", "retrain"),
     )
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--host", default="0.0.0.0")
@@ -101,7 +118,10 @@ def main() -> None:
     args = parser.parse_args()
     settings = get_settings()
     if args.command == "bootstrap":
-        asyncio.run(bootstrap(settings))
+        bootstrap_all(settings)
+        return
+    if args.command == "import-data":
+        asyncio.run(import_published(settings))
         return
     if args.command == "retrain":
         if not args.run_id:
@@ -111,3 +131,7 @@ def main() -> None:
     import uvicorn
 
     uvicorn.run("laboratorio_2.main:app", host=args.host, port=args.port)
+
+
+if __name__ == "__main__":
+    main()

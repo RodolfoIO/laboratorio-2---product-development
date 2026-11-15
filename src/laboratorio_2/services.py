@@ -182,7 +182,7 @@ class RetrainingService:
                 run_id,
                 state="fallido",
                 promoted=False,
-                version="",
+                version=await self._current_version(),
                 motive="No se pudo iniciar el reentrenamiento",
                 error=str(exc),
             )
@@ -202,7 +202,7 @@ class RetrainingService:
 
     async def execute(self, run_id: str) -> None:
         try:
-            outcome = await self.pipeline.train(run_id, promote=True, log_mlflow=True)
+            outcome = await self.pipeline.train(run_id, log_mlflow=True)
             await self.repository.update_retraining_run(
                 run_id,
                 state="exitoso",
@@ -215,11 +215,20 @@ class RetrainingService:
                 run_id,
                 state="fallido",
                 promoted=False,
-                version="",
+                version=await self._current_version(),
                 motive="El reentrenamiento fallo; el campeon vigente no fue modificado",
                 error=str(exc),
             )
             raise
+
+    async def _current_version(self) -> str:
+        if self.pipeline.registry is None:
+            return ""
+        try:
+            alias = await asyncio.to_thread(self.pipeline.registry.get_alias)
+        except Exception:
+            return ""
+        return alias[0] if alias is not None else ""
 
 
 @dataclass

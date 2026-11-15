@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -98,6 +99,64 @@ def create_app(
     @app.post("/v1/observaciones", response_model=ObservationResponse)
     async def register_observation(request: ObservationRequest) -> ObservationResponse:
         return await app_services.observations.register(request)
+
+    def verify_internal_token(token: str | None) -> None:
+        if token != app_settings.internal_task_token:
+            raise HTTPException(status_code=403, detail="Token interno invalido")
+
+    @app.post("/internal/validar-datos", include_in_schema=False)
+    async def validate_training_data(
+        x_internal_token: str | None = Header(default=None),
+    ) -> dict[str, int]:
+        verify_internal_token(x_internal_token)
+        catalog = await app_services.repository.get_catalog()
+        sales = await app_services.repository.load_sales()
+        if not catalog.stores or not catalog.families or sales.empty:
+            raise HTTPException(status_code=422, detail="No hay datos para entrenar")
+        return {
+            "tiendas": len(catalog.stores),
+            "familias": len(catalog.families),
+            "registros": len(sales),
+        }
+
+    @app.post("/internal/reentrenar/{run_id}", status_code=202, include_in_schema=False)
+    async def execute_retraining(
+        run_id: str,
+        x_internal_token: str | None = Header(default=None),
+    ) -> dict[str, str]:
+        verify_internal_token(x_internal_token)
+
+        def execute_in_worker() -> None:
+            worker_services = build_services(app_settings)
+
+            async def execute() -> None:
+                try:
+                    await worker_services.retraining.execute(run_id)
+                finally:
+                    await worker_services.database.close()
+
+            asyncio.run(execute())
+
+        await asyncio.to_thread(execute_in_worker)
+        return {"id": run_id, "estado": "exitoso"}
+
+    @app.post("/internal/reentrenar/{run_id}/fallo", include_in_schema=False)
+    async def mark_retraining_failed(
+        run_id: str,
+        payload: dict[str, str] | None = None,
+        x_internal_token: str | None = Header(default=None),
+    ) -> dict[str, str]:
+        verify_internal_token(x_internal_token)
+        current_model = app_services.model_manager.info()
+        await app_services.repository.update_retraining_run(
+            run_id,
+            state="fallido",
+            promoted=False,
+            version=current_model.version if current_model is not None else "",
+            motive="El DAG fallo; el campeon vigente no fue modificado",
+            error=(payload or {}).get("error", "fallo de Airflow"),
+        )
+        return {"id": run_id, "estado": "fallido"}
 
     @app.post(
         "/admin/reentrenar",

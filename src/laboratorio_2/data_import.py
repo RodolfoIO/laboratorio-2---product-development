@@ -276,10 +276,11 @@ async def import_data(database: Database, bundle: DataBundle) -> Catalog:
             cost_insert = pg_insert(CostRecord).values(
                 bundle.costs.rename(
                     columns={
+                        "familia_id": "family_id",
                         "costo_faltante": "shortage_cost",
                         "costo_sobrante": "surplus_cost",
                     }
-                )[["familia_id", "shortage_cost", "surplus_cost"]].to_dict("records")
+                )[["family_id", "shortage_cost", "surplus_cost"]].to_dict("records")
             )
             await session.execute(
                 cost_insert.on_conflict_do_update(
@@ -298,7 +299,7 @@ async def import_data(database: Database, bundle: DataBundle) -> Catalog:
                     "tipo": "holiday_type",
                     "descripcion": "description",
                 }
-            ).to_dict("records")
+            )[["date", "scope", "holiday_type", "description"]].to_dict("records")
             holiday_insert = pg_insert(HolidayRecord).values(holiday_rows)
             await session.execute(
                 holiday_insert.on_conflict_do_update(
@@ -314,13 +315,15 @@ async def import_data(database: Database, bundle: DataBundle) -> Catalog:
             history_rows = (
                 bundle.history.rename(
                     columns={
+                        "fecha": "date",
                         "tienda_id": "store_id",
                         "familia_id": "family_id",
                         "ventas": "sales",
                         "en_promocion": "promotion_count",
                     }
+                )[["date", "store_id", "family_id", "sales", "promotion_count"]].to_dict(
+                    "records"
                 )
-                .to_dict("records")
             )
             await session.execute(pg_insert(HistoricalSaleRecord), history_rows)
 

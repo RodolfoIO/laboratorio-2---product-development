@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     airflow_password: str = "admin"
     airflow_dag_id: str = "novamercado_retrain"
     airflow_request_timeout_seconds: float = 10.0
+    internal_task_token: str = "local-internal-token"
 
     health_probe_timeout_seconds: float = 3.0
     validation_days: int = 28

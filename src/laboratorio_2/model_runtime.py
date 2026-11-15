@@ -42,19 +42,29 @@ class ModelManager:
         if not isinstance(artifact, ForecastArtifact):
             raise TypeError("El artefacto local no es un ForecastArtifact")
         metadata = {
-            "name": self.settings.mlflow_model_name,
+            "nombre": self.settings.mlflow_model_name,
             "alias": self.settings.mlflow_alias,
             "version": "local",
         }
         if self.metadata_path.is_file():
-            metadata.update(json.loads(self.metadata_path.read_text(encoding="utf-8")))
+            stored = json.loads(self.metadata_path.read_text(encoding="utf-8"))
+            if "name" in stored and "nombre" not in stored:
+                stored["nombre"] = stored.pop("name")
+            metadata.update(stored)
         self._snapshot = ModelSnapshot(artifact, ModelInfo(**metadata))
         return True
 
     async def start(self) -> None:
         if self._snapshot is None:
             self.load_local()
-        await self.refresh_once()
+        if self._snapshot is None:
+            try:
+                await asyncio.wait_for(
+                    self.refresh_once(),
+                    timeout=self.settings.health_probe_timeout_seconds,
+                )
+            except TimeoutError:
+                self._last_refresh_error = "MLflow no respondio durante el arranque"
         self._task = asyncio.create_task(self._poll(), name="model-alias-poller")
 
     async def stop(self) -> None:

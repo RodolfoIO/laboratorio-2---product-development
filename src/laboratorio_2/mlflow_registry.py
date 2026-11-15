@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -27,6 +28,8 @@ class MlflowRegistry:
         if self._client is None:
             from mlflow import MlflowClient
 
+            os.environ.setdefault("MLFLOW_HTTP_REQUEST_TIMEOUT", "3")
+            os.environ.setdefault("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "0")
             self._client = MlflowClient(
                 tracking_uri=self.settings.mlflow_tracking_uri,
                 registry_uri=self.settings.mlflow_tracking_uri,
@@ -82,17 +85,19 @@ class MlflowRegistry:
         run_id_hint: str,
     ) -> RegisteredVersion:
         import mlflow
+
         mlflow.set_tracking_uri(self.settings.mlflow_tracking_uri)
         mlflow.set_experiment("novamercado-forecast")
+        self._ensure_registered_model()
         with mlflow.start_run(run_name=f"{run_id_hint}-{algorithm}") as run:
             mlflow.set_tags({**tags, "algorithm": algorithm, "retraining_run": run_id_hint})
             mlflow.log_params(params)
             mlflow.log_metrics(metrics)
             mlflow.log_artifact(str(artifact_path), artifact_path="model")
-            model_uri = f"runs:/{run.info.run_id}/model"
-            registered = mlflow.register_model(
-                model_uri,
+            registered = self.client.create_model_version(
                 name=self.settings.mlflow_model_name,
+                source=f"{run.info.artifact_uri}/model",
+                run_id=run.info.run_id,
                 tags={"algorithm": algorithm},
             )
             self.client.set_model_version_tag(
@@ -113,6 +118,15 @@ class MlflowRegistry:
                 run_id=run.info.run_id,
                 algorithm=algorithm,
             )
+
+    def _ensure_registered_model(self) -> None:
+        from mlflow.exceptions import MlflowException
+
+        try:
+            self.client.create_registered_model(self.settings.mlflow_model_name)
+        except MlflowException as exc:
+            if exc.error_code != "RESOURCE_ALREADY_EXISTS":
+                raise
 
     def set_champion(self, version: str) -> None:
         self.client.set_registered_model_alias(
