@@ -1,0 +1,52 @@
+[project]
+name = "laboratorio-2"
+version = "0.1.0"
+description = "Servicio de pronostico diario de ventas para NovaMercado"
+readme = "README.md"
+authors = [
+    { name = "Rodolfo David Izaguirre Oliveros", email = "izaguirre.rodolfo@gmail.com" }
+]
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "alembic>=1.14,<2",
+    "asyncpg>=0.30,<1",
+    "fastapi[standard]>=0.115,<1",
+    "httpx>=0.27,<1",
+    "joblib>=1.4,<2",
+    "lightgbm>=4.5,<5",
+    "mlflow>=3,<4",
+    "numpy>=2,<3",
+    "pandas>=2.2,<3",
+    "pydantic-settings>=2.6,<3",
+    "pyarrow>=18,<23",
+    "sqlalchemy[asyncio]>=2.0.36,<3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3,<10",
+    "pytest-asyncio>=0.24,<2",
+    "ruff>=0.8,<1",
+]
+
+[project.scripts]
+laboratorio-2 = "laboratorio_2.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.13.7,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+    "integration: requiere PostgreSQL mediante DATABASE_URL",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["B008"]

@@ -1,0 +1,224 @@
+name: novamercado
+
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: Dockerfile.airflow
+  image: novamercado-airflow:3.1.0
+  environment: &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_POSTGRES_USER:-airflow}:${AIRFLOW_POSTGRES_PASSWORD:-airflow}@postgres-airflow:5432/${AIRFLOW_POSTGRES_DB:-airflow}
+    AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session
+    AIRFLOW__API_AUTH__JWT_SECRET: novamercado-local-airflow-secret
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-Zm9yLWxvY2FsLWRldmVsb3BtZW50LW9ubHktMzJieXRlcw==}
+    DATABASE_URL: postgresql+asyncpg://${PRODUCT_POSTGRES_USER:-novamercado}:${PRODUCT_POSTGRES_PASSWORD:-novamercado}@postgres-producto:5432/${PRODUCT_POSTGRES_DB:-novamercado}
+    MLFLOW_TRACKING_URI: http://mlflow:5000
+    MLFLOW_MODEL_NAME: novamercado-forecast
+    MLFLOW_ALIAS: champion
+    DATA_DIR: /data/raw
+    MODEL_CACHE_DIR: /models
+    AIRFLOW_BASE_URL: http://airflow-apiserver:8080
+    AIRFLOW_USERNAME: ${AIRFLOW_ADMIN_USERNAME:-admin}
+    AIRFLOW_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-admin}
+    PYTHONPATH: /opt/project/src
+  volumes:
+    - ./dags:/opt/airflow/dags:ro
+    - ./data/raw:/data/raw:ro
+    - model-cache:/models
+    - airflow-logs:/opt/airflow/logs
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on:
+    postgres-airflow:
+      condition: service_healthy
+    postgres-producto:
+      condition: service_healthy
+
+services:
+  postgres-producto:
+    image: postgres:16.6-bookworm
+    environment:
+      POSTGRES_USER: ${PRODUCT_POSTGRES_USER:-novamercado}
+      POSTGRES_PASSWORD: ${PRODUCT_POSTGRES_PASSWORD:-novamercado}
+      POSTGRES_DB: ${PRODUCT_POSTGRES_DB:-novamercado}
+    ports:
+      - "${PRODUCT_POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres-product-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  postgres-airflow:
+    image: postgres:16.6-bookworm
+    environment:
+      POSTGRES_USER: ${AIRFLOW_POSTGRES_USER:-airflow}
+      POSTGRES_PASSWORD: ${AIRFLOW_POSTGRES_PASSWORD:-airflow}
+      POSTGRES_DB: ${AIRFLOW_POSTGRES_DB:-airflow}
+    volumes:
+      - postgres-airflow-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  postgres-mlflow:
+    image: postgres:16.6-bookworm
+    environment:
+      POSTGRES_USER: ${MLFLOW_POSTGRES_USER:-mlflow}
+      POSTGRES_PASSWORD: ${MLFLOW_POSTGRES_PASSWORD:-mlflow}
+      POSTGRES_DB: ${MLFLOW_POSTGRES_DB:-mlflow}
+    volumes:
+      - postgres-mlflow-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  mlflow:
+    build:
+      context: .
+      dockerfile: Dockerfile.mlflow
+    image: novamercado-mlflow:3.18.0
+    command:
+      - mlflow
+      - server
+      - --host
+      - 0.0.0.0
+      - --port
+      - "5000"
+      - --backend-store-uri
+      - postgresql+psycopg2://${MLFLOW_POSTGRES_USER:-mlflow}:${MLFLOW_POSTGRES_PASSWORD:-mlflow}@postgres-mlflow:5432/${MLFLOW_POSTGRES_DB:-mlflow}
+      - --artifacts-destination
+      - /mlflow/artifacts
+      - --serve-artifacts
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow-artifacts:/mlflow/artifacts
+    depends_on:
+      postgres-mlflow:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=3)\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  airflow-init:
+    <<: *airflow-common
+    command:
+      - bash
+      - -c
+      - |
+        airflow db migrate
+        airflow users create \
+          --username "${AIRFLOW_ADMIN_USERNAME:-admin}" \
+          --password "${AIRFLOW_ADMIN_PASSWORD:-admin}" \
+          --firstname Admin \
+          --lastname NovaMercado \
+          --role Admin \
+          --email admin@novamercado.local || true
+    restart: "no"
+
+  airflow-apiserver:
+    <<: *airflow-common
+    command: api-server
+    ports:
+      - "8080:8080"
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: dag-processor
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  bootstrap:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    image: novamercado-api:1.0.0
+    command: ["python", "-m", "laboratorio_2.cli", "bootstrap"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${PRODUCT_POSTGRES_USER:-novamercado}:${PRODUCT_POSTGRES_PASSWORD:-novamercado}@postgres-producto:5432/${PRODUCT_POSTGRES_DB:-novamercado}
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_MODEL_NAME: novamercado-forecast
+      MLFLOW_ALIAS: champion
+      DATA_DIR: /data/raw
+      MODEL_CACHE_DIR: /models
+    volumes:
+      - ./data/raw:/data/raw:ro
+      - model-cache:/models
+    depends_on:
+      postgres-producto:
+        condition: service_healthy
+      mlflow:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    image: novamercado-api:1.0.0
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${PRODUCT_POSTGRES_USER:-novamercado}:${PRODUCT_POSTGRES_PASSWORD:-novamercado}@postgres-producto:5432/${PRODUCT_POSTGRES_DB:-novamercado}
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_MODEL_NAME: novamercado-forecast
+      MLFLOW_ALIAS: champion
+      MODEL_RELOAD_SECONDS: ${MODEL_RELOAD_SECONDS:-30}
+      HEALTH_PROBE_TIMEOUT_SECONDS: ${HEALTH_PROBE_TIMEOUT_SECONDS:-3}
+      AIRFLOW_BASE_URL: http://airflow-apiserver:8080
+      AIRFLOW_USERNAME: ${AIRFLOW_ADMIN_USERNAME:-admin}
+      AIRFLOW_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-admin}
+      DATA_DIR: /data/raw
+      MODEL_CACHE_DIR: /models
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data/raw:/data/raw:ro
+      - model-cache:/models
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+      airflow-apiserver:
+        condition: service_started
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)\"",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+
+volumes:
+  postgres-product-data:
+  postgres-airflow-data:
+  postgres-mlflow-data:
+  mlflow-artifacts:
+  model-cache:
+  airflow-logs:
