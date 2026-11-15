@@ -222,10 +222,11 @@ class RetrainingService:
             raise
 
     async def _current_version(self) -> str:
-        if self.pipeline.registry is None:
+        registry = getattr(self.pipeline, "registry", None)
+        if registry is None:
             return ""
         try:
-            alias = await asyncio.to_thread(self.pipeline.registry.get_alias)
+            alias = await asyncio.to_thread(registry.get_alias)
         except Exception:
             return ""
         return alias[0] if alias is not None else ""

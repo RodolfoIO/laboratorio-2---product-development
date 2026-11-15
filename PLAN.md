@@ -88,4 +88,4 @@ Actualizado: 2026-11-14
 - [x] `AGENTS.md` con contexto para futuros agentes.
 - [x] Script de aceptación automatizado.
 - [x] Evidencia final de MLflow, Airflow y respuestas de API.
-- [ ] Tag `entrega-lab2` y último push de la versión validada.
+- [x] Tag `entrega-lab2` y último push de la versión validada.
