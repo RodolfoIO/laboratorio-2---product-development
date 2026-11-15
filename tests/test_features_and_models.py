@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import joblib
 import pandas as pd
+import tempfile
+from pathlib import Path
 
 from laboratorio_2.features import (
     PredictionFamily,
@@ -92,7 +94,10 @@ def test_baseline_and_lightgbm_improve_or_remain_serializable(
         data_fingerprint="abc",
         code_revision="test",
     )
-    restored = joblib.loads(joblib.dumps(artifact))
+    with tempfile.TemporaryDirectory() as temp_dir:
+        path = Path(temp_dir) / "model.joblib"
+        joblib.dump(artifact, path)
+        restored = joblib.load(path)
     restored_expected, restored_suggested = restored.predict(validation.head(4), catalog)
     assert len(restored_expected) == 4
     assert len(restored_suggested) == 4
